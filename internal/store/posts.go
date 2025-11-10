@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/lib/pq"
@@ -24,8 +25,8 @@ type PostStore struct {
 
 func (s *PostStore) Create(ctx context.Context, post *Post) error {
 	query := `
-		INSERT INTO posts (content, title, user_id, tags)
-		VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at;
+	INSERT INTO posts (content, title, user_id, tags)
+	VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at
 	`
 
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
@@ -50,7 +51,7 @@ func (s *PostStore) Create(ctx context.Context, post *Post) error {
 	return nil
 }
 
-func (s *PostStore) GetByID(ctx context.Context, id int64) error {
+func (s *PostStore) GetByID(ctx context.Context, id int64) (*Post, error) {
 	query := `
 		SELECT id, user_id, title, content, created_at, updated_at, tags
 	 	FROM posts
@@ -70,8 +71,13 @@ func (s *PostStore) GetByID(ctx context.Context, id int64) error {
 		pq.Array(&post.Tags),
 	)
 	if err != nil {
-		return err
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrorNotFound
+		default:
+			return nil, err
+		}
 	}
 
-	return nil
+	return &post, nil
 }

@@ -27,7 +27,7 @@ type dbConfig struct {
 	maxIdleTime        string
 }
 
-func (a *application) mount() http.Handler {
+func (app *application) mount() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -37,7 +37,19 @@ func (a *application) mount() http.Handler {
 
 	r.Use(middleware.Timeout(time.Second * 67)) // SIX SEVEN
 
-	r.HandleFunc("/health", a.HealthChechHandler)
+	r.Route("/v1", func(r chi.Router) {
+		// Operations
+		r.HandleFunc("/health", app.HealthChechHandler)
+
+		// Posts Route Group
+		r.Route("/posts", func(r chi.Router) {
+			r.Post("/", app.createPostHandler)
+			r.Route("/{postID}", func(r chi.Router) {
+				r.Get("/", app.getPostHandler)
+			})
+		})
+	})
+
 	return r
 }
 
