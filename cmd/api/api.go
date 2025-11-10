@@ -20,7 +20,6 @@ type config struct {
 func (a *application) mount() http.Handler {
 	r := chi.NewRouter()
 
-	// Middlewares
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
