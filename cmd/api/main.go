@@ -40,5 +40,6 @@ func main() {
 		config: cfg,
 		store:  store,
 	}
+	log.Printf("Application Started On %s", cfg.addr)
 	log.Fatal(app.Run())
 }
