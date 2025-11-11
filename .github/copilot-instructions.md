@@ -2,102 +2,212 @@
 
 ## Project Overview
 
-Go REST API for a social media platform using chi router, PostgreSQL, and a repository pattern with interface-based storage layer.
+Go REST API for social media platform using **chi router**, **PostgreSQL**, and **repository pattern** with interface-based storage.
 
-## Architecture Pattern: Repository + Interface Storage
+## Architecture: 3-Layer Pattern
 
-**Critical**: All database operations go through interface-based repositories in `internal/store/`:
+```
+cmd/api/        → HTTP handlers, routing, JSON marshaling
+internal/store/ → Repository interfaces + PostgreSQL implementations
+internal/db/    → Connection pool setup, seeding utilities
+```
 
-- Define interface in `store.go` (e.g., `Posts`, `Users`, `Comments`)
-- Implement in separate files (`posts.go`, `users.go`, `comments.go`)
-- **Must pass `db *sql.DB` when initializing stores** in `NewStorage()` - forgetting this causes nil pointer panics
-- All store methods use `context.WithTimeout(ctx, QueryTimeoutDuration)` for database operations
+**Critical Rule**: Database operations ONLY through `internal/store/` interfaces. Never call `db.Query()` directly in handlers.
+
+## Storage Layer Pattern
+
+**All new repositories follow this pattern:**
+
+1. **Define interface** in `internal/store/store.go`:
 
 ```go
-// Example: Always initialize stores with db connection
+type Posts interface {
+    Create(context.Context, *Post) error
+    GetByID(context.Context, int64) (*Post, error)
+}
+```
+
+2. **Implement in separate file** (e.g., `posts.go`):
+
+```go
+type PostStore struct {
+    db *sql.DB  // ← MUST be initialized or nil pointer panic
+}
+```
+
+3. **Register in `NewStorage()`** - forgetting `db: db` causes runtime panics:
+
+```go
 func NewStorage(db *sql.DB) Storage {
     return Storage{
-        PostsRepo: &PostStore{db: db},  // ← db parameter is REQUIRED
-        UsersRepo: &UsersStore{db: db},
+        PostsRepo: &PostStore{db: db},  // ← db parameter REQUIRED
     }
 }
 ```
 
-## Handler Pattern (cmd/api/)
-
-1. **Error Handling**: Use centralized error methods from `errors.go`, never direct `writeJSONError()`:
-
-   - `app.badRequestResponse(w, r, err)` - validation/parsing errors
-   - `app.notFoundResponse(w, r, err)` - missing resources
-   - `app.internalServerError(w, r, err)` - database/server errors
-   - `app.conflictResponse(w, r, err)` - duplicates/conflicts
-
-2. **Validation**: Use `go-playground/validator` via global `Validate` (initialized in `json.go`):
+4. **Always use context timeouts** (already set to 5s via `QueryTimeoutDuration`):
 
 ```go
-type CreatePayload struct {
-    Title string `json:"title" validate:"required,max=100"`
-}
-// Then: if err := Validate.Struct(payload); err != nil
+ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
+defer cancel()
 ```
 
-3. **JSON Operations**: Use helper functions from `json.go`:
+## Handler Development Pattern
 
-   - `readJSON(w, r, &payload)` - max 1MB, disallows unknown fields
-   - `writeJSON(w, status, data)` - auto sets Content-Type
-   - Never use direct `json.Encoder/Decoder` in handlers
+**File**: `cmd/api/<resource>.go` (e.g., `posts.go`)
 
-4. **Response Status Codes**:
-   - POST create: `http.StatusCreated` (201)
-   - GET: `http.StatusOK` (200)
-   - DELETE: `http.StatusNoContent` (204)
+### 1. JSON Request/Response
+
+- **Read**: `readJSON(w, r, &payload)` - enforces 1MB limit, rejects unknown fields
+- **Write**: `app.jsonResponse(w, status, data)` - wraps in `{"data": ...}` envelope
+- **Never** use `json.NewEncoder/Decoder` directly
+
+### 2. Validation (go-playground/validator)
+
+Use global `Validate` from `json.go`:
+
+```go
+type CreatePostPayload struct {
+    Title string `json:"title" validate:"required,max=100"`
+}
+if err := Validate.Struct(payload); err != nil {
+    app.badRequestResponse(w, r, err)  // ← Use error helpers
+}
+```
+
+### 3. Error Handling
+
+**Always use methods from `errors.go`** (never raw `writeJSONError`):
+
+- `app.badRequestResponse(w, r, err)` - validation, parsing failures
+- `app.notFoundResponse(w, r, err)` - `store.ErrorNotFound` from DB
+- `app.internalServerError(w, r, err)` - database/server errors
+- `app.conflictResponse(w, r, err)` - unique constraint violations
+
+### 4. Status Codes
+
+- `http.StatusCreated` (201) - POST creates
+- `http.StatusOK` (200) - GET, PATCH
+- `http.StatusNoContent` (204) - DELETE (no body)
+
+## Routing (cmd/api/api.go)
+
+**Chi router with nested routes**:
+
+```go
+r.Route("/v1", func(r chi.Router) {
+    r.Route("/posts", func(r chi.Router) {
+        r.Post("/", app.createPostHandler)
+
+        r.Route("/{postID}", func(r chi.Router) {
+            r.Use(app.postsContextMiddleware)  // ← Middleware loads resource
+            r.Get("/", app.getPostHandler)
+        })
+    })
+})
+```
+
+**URL params**: `chi.URLParam(r, "postID")` → `strconv.ParseInt()` → validate
+
+**Custom error handlers** (configured in `mount()`):
+
+- `r.NotFound()` - handles 404s
+- `r.MethodNotAllowed()` - handles 405s
+
+## Middleware Pattern
+
+**Context middleware** (see `postsContextMiddleware`):
+
+1. Extract ID from URL params
+2. Fetch resource from store
+3. Handle `store.ErrorNotFound` specifically
+4. Store in context: `context.WithValue(ctx, "post", post)`
+5. Retrieve later: `getPostFromCtx(r)` helper
 
 ## Database & Migrations
 
-**Setup**: PostgreSQL via Docker Compose (`docker compose up -d`)
+**Stack**: PostgreSQL 16 (Docker), golang-migrate
 
-- Connection: `postgres://devuser:devpass@localhost:5432/myapp_dev?sslmode=disable`
-- Use `golang-migrate` for schema changes (NOT manual SQL in `db.Exec`)
+**Start DB**: `docker compose up -d` (creates `myapp_dev` on port 5432)
+**Credentials**: `devuser/devpass` (see `docker-compose.yaml`)
 
-**Migration Commands** (via Makefile):
+### Migration Workflow (via Makefile)
 
 ```bash
-make migrate-create NAME=add_feature    # Creates up/down pair
-make migrate-up                          # Apply migrations
-make migrate-down                        # Rollback one migration
-make migrate-version                     # Check current version
-make migrate-force VERSION=X             # Fix dirty migrations
+make migrate-create NAME=add_followers   # Creates 000007_add_followers.{up,down}.sql
+make migrate-up                           # Apply pending migrations
+make migrate-down                         # Rollback last migration
+make migrate-force VERSION=6              # Fix dirty state (when migration fails mid-run)
 ```
 
-**Migration Pattern**: Stored in `cmd/migrate/migrations/`, sequential naming `NNNNNN_description.{up,down}.sql`
+**Storage**: `cmd/migrate/migrations/` with sequential naming (`000001_`, `000002_`, etc.)
 
-## Development Workflow
+**Never**: Run raw DDL via `db.Exec()` - always create migration files
 
-**Run dev server**: `make watch` (uses Air for hot reload)
-**Build binary**: `make build` → `./bin/main`
-**Config**: Environment vars in `.env` (loaded via `godotenv` in `main.go`)
+## PostgreSQL Array Handling
+
+Use `github.com/lib/pq` for array types (e.g., `tags TEXT[]`):
+
+```go
+// Insert
+pq.Array(post.Tags)
+
+// Scan
+pq.Array(&post.Tags)
+```
+
+## Environment Configuration
+
+**Package**: `internal/env/env.go` provides type-safe helpers:
+
+```go
+env.GetString("ADDR", ":6767")           // Fallback to :6767
+env.GetInt("DB_MAX_OPEN_CONNS", 30)      // Parse int or fallback
+```
+
+**Loading**: `godotenv.Load()` in `main.go` reads `.env` (gitignored)
+
+**Example .env**:
+
+```
+ADDR=:6767
+DB_ADDR=postgres://devuser:devpass@localhost:5432/myapp_dev?sslmode=disable
+```
+
+## Development Commands
+
+```bash
+make watch   # Hot reload via Air (dev mode)
+make build   # Compile to ./bin/main
+make seed    # Populate test data (runs cmd/seed/main.go)
+```
+
+## Data Relationships & Eager Loading
+
+**Pattern**: Fetch related data via separate repository calls:
+
+```go
+// In getPostHandler:
+post := getPostFromCtx(r)
+comments, _ := app.store.CommentRepo.GetByPostID(ctx, post.ID)
+post.Comments = comments  // Attach to response
+```
+
+**Comments join users**: `CommentStore.GetByPostID()` uses `INNER JOIN users` to include user data.
 
 ## Common Pitfalls
 
-1. **Nil DB Panic**: If you see "nil pointer dereference" in store methods, check `NewStorage()` passes `db: db` to all stores
-2. **Foreign Keys**: Posts reference `user_id` → users table. Create test users before posts
-3. **Array Types**: PostgreSQL arrays use `pq.Array()` for tags: `pq.Array(post.Tags)` when inserting, `pq.Array(&post.Tags)` when scanning
-4. **Context Timeouts**: Always create timeout contexts in store methods before DB calls (see `QueryTimeoutDuration = 5s`)
-5. **Chi URL Params**: Use `chi.URLParam(r, "postID")` for path params, then `strconv.ParseInt()`
+1. **Nil Pointer Panic in Store**: Check `NewStorage()` passes `db: db` to all struct fields
+2. **405 Instead of 404**: Configure `r.NotFound()` and `r.MethodNotAllowed()` in `mount()`
+3. **Hardcoded User IDs**: `POST /v1/posts` uses `UserID: 2` temporarily - run `make seed` first
+4. **Array Scanning**: Always use `pq.Array()` for PostgreSQL array columns
+5. **Context Leaks**: Always `defer cancel()` after `context.WithTimeout()`
 
-## Testing Data Flow
+## Key Files
 
-Posts with comments example:
-
-- `POST /v1/posts` creates post (requires `user_id` in body, currently hardcoded to 2)
-- `GET /v1/posts/{id}` returns post WITH comments array (joined query in `CommentStore.GetByPostID`)
-- Comments fetched via separate repository method after post retrieval
-
-## Key Files Reference
-
-- `cmd/api/main.go` - Entry point, config, DB initialization
-- `cmd/api/api.go` - Router setup (chi), middleware configuration
-- `cmd/api/errors.go` - Centralized error handlers (USE THESE, not direct JSON writes)
-- `internal/store/store.go` - Storage interfaces and factory
-- `internal/db/db.go` - DB connection pool setup
-- `.env` - Database connection strings (gitignored)
+- `cmd/api/api.go` - Router, middleware stack, custom error handlers
+- `cmd/api/errors.go` - **USE THESE** for all error responses
+- `cmd/api/json.go` - JSON helpers, validator init (`Validate`)
+- `internal/store/store.go` - Repository interfaces, `NewStorage()` factory
+- `internal/db/db.go` - Connection pool config (max conns, idle timeout)
+- `Makefile` - All CLI commands (build, migrate, seed)
