@@ -107,3 +107,34 @@ func (s *PostStore) Delete(ctx context.Context, postID int64) error {
 
 	return nil
 }
+
+func (s *PostStore) Update(ctx context.Context, post *Post) error {
+	query := `
+		UPDATE posts
+		SET title = $1, content = $2, updated_at = NOW()
+		WHERE id = $3
+		RETURNING updated_at
+	`
+
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
+	defer cancel()
+
+	err := s.db.QueryRowContext(
+		ctx,
+		query,
+		post.Title,
+		post.Content,
+		post.ID,
+	).Scan(&post.UpdatedAt)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrorNotFound
+		default:
+			return err
+		}
+	}
+
+	return nil
+}
