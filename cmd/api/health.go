@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 )
 
@@ -10,7 +9,6 @@ func (app *application) HealthChechHandler(w http.ResponseWriter, r *http.Reques
 		"status": "OK",
 	}
 	if err := app.jsonResponse(w, http.StatusOK, data); err != nil {
-		// TODO: More proper error handling
-		log.Println("writeJSON error:", err)
+		app.internalServerError(w, r, err)
 	}
 }
