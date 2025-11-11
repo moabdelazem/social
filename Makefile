@@ -14,6 +14,12 @@ build:
 	@echo "Building the binary in the bin dir"
 	@go build -o ./bin/main ./cmd/api
 
+# Database Seeding
+.PHONY: seed
+seed:
+	@echo "Seeding the database..."
+	@go run cmd/seed/main.go
+
 # Database Migrations
 .PHONY: migrate-up
 migrate-up:
