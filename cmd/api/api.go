@@ -37,6 +37,16 @@ func (app *application) mount() http.Handler {
 
 	r.Use(middleware.Timeout(time.Second * 67)) // SIX SEVEN
 
+	// Custom 404 Not Found handler
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "the requested resource could not be found")
+	})
+
+	// Custom 405 Method Not Allowed handler
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		app.methodNotAllowedResponse(w, r)
+	})
+
 	r.Route("/v1", func(r chi.Router) {
 		// Operations
 		r.HandleFunc("/health", app.HealthChechHandler)
