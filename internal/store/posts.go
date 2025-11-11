@@ -18,6 +18,7 @@ type Post struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Comments  []Comment `json:"comments"`
+	Version   int       `json:"version"`
 }
 
 type PostStore struct {
@@ -27,7 +28,7 @@ type PostStore struct {
 func (s *PostStore) Create(ctx context.Context, post *Post) error {
 	query := `
 	INSERT INTO posts (content, title, user_id, tags)
-	VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at
+	VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at, version
 	`
 
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
@@ -44,6 +45,7 @@ func (s *PostStore) Create(ctx context.Context, post *Post) error {
 		&post.ID,
 		&post.CreatedAt,
 		&post.UpdatedAt,
+		&post.Version,
 	)
 	if err != nil {
 		return err
@@ -54,7 +56,7 @@ func (s *PostStore) Create(ctx context.Context, post *Post) error {
 
 func (s *PostStore) GetByID(ctx context.Context, id int64) (*Post, error) {
 	query := `
-		SELECT id, user_id, title, content, created_at, updated_at, tags
+		SELECT id, user_id, title, content, created_at, updated_at, tags, version
 	 	FROM posts
 		WHERE id = $1
 	`
@@ -70,6 +72,7 @@ func (s *PostStore) GetByID(ctx context.Context, id int64) (*Post, error) {
 		&post.CreatedAt,
 		&post.UpdatedAt,
 		pq.Array(&post.Tags),
+		&post.Version,
 	)
 	if err != nil {
 		switch {
@@ -111,9 +114,9 @@ func (s *PostStore) Delete(ctx context.Context, postID int64) error {
 func (s *PostStore) Update(ctx context.Context, post *Post) error {
 	query := `
 		UPDATE posts
-		SET title = $1, content = $2, updated_at = NOW()
-		WHERE id = $3
-		RETURNING updated_at
+		SET title = $1, content = $2, version = version + 1, updated_at = NOW()
+		WHERE id = $3 AND version = $4
+		RETURNING version, updated_at
 	`
 
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
@@ -125,7 +128,11 @@ func (s *PostStore) Update(ctx context.Context, post *Post) error {
 		post.Title,
 		post.Content,
 		post.ID,
-	).Scan(&post.UpdatedAt)
+		post.Version,
+	).Scan(
+		&post.Version,
+		&post.UpdatedAt,
+	)
 
 	if err != nil {
 		switch {
