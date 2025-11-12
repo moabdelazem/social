@@ -3,14 +3,34 @@ package store
 import (
 	"context"
 	"database/sql"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	ID        int64  `json:"id"`
-	Username  string `json:"username"`
-	Email     string `json:"email"`
-	Password  string `json:"-"`
-	CreatedAt string `json:"created_at"`
+	ID        int64    `json:"id"`
+	Username  string   `json:"username"`
+	Email     string   `json:"email"`
+	Password  Password `json:"-"`
+	CreatedAt string   `json:"created_at"`
+}
+
+type Password struct {
+	Text *string
+	Hash []byte
+}
+
+func (p *Password) Set(text string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(text), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	p.Text = &text
+	p.Hash = hash
+
+	return nil
 }
 
 type UsersStore struct {
@@ -27,7 +47,7 @@ func (s *UsersStore) Create(ctx context.Context, user *User) error {
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
 	defer cancel()
 
-	err := s.db.QueryRowContext(ctx, query, user.Username, user.Email, user.Password).Scan(
+	err := s.db.QueryRowContext(ctx, query, user.Username, user.Email, user.Password.Hash).Scan(
 		&user.ID,
 		&user.CreatedAt,
 	)
@@ -67,4 +87,35 @@ func (s *UsersStore) GetByID(ctx context.Context, id int64) (*User, error) {
 	}
 
 	return user, nil
+}
+
+func (s *UsersStore) CreateAndInvite(ctx context.Context, user *User, token string, exp time.Time) error {
+	return withTx(s.db, ctx, func(tx *sql.Tx) error {
+		// Create the user using the existing Create method logic
+		if err := s.Create(ctx, user); err != nil {
+			return err
+		}
+
+		// Create the invitation token
+		if err := s.createUserInvitation(ctx, tx, token, exp, user.ID); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *UsersStore) createUserInvitation(ctx context.Context, tx *sql.Tx, token string, exp time.Time, userID int64) error {
+	query := `
+		INSERT INTO user_invitations (token, user_id, expiry)
+		VALUES ($1, $2, $3)	
+	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
+	defer cancel()
+
+	_, err := tx.ExecContext(ctx, query, token, userID, exp)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

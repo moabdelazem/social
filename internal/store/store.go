@@ -32,6 +32,7 @@ type Posts interface {
 type Users interface {
 	Create(context.Context, *User) error
 	GetByID(context.Context, int64) (*User, error)
+	CreateAndInvite(context.Context, *User, string, time.Time) error
 }
 
 type Comments interface {
@@ -50,4 +51,32 @@ func NewStorage(db *sql.DB) Storage {
 		CommentRepo:  &CommentStore{db: db},
 		FollowerRepo: &FollowerStore{db: db},
 	}
+}
+
+// withTx executes a function within a database transaction.
+// If the function returns an error, the transaction is rolled back.
+// If the function succeeds, the transaction is committed.
+func withTx(db *sql.DB, ctx context.Context, fn func(*sql.Tx) error) error {
+	// Start a new transaction
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	// Defer rollback in case of panic or error
+	// If Commit() is called successfully, Rollback() is a no-op
+	defer tx.Rollback()
+
+	// Execute the provided function with the transaction
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	// Commit the transaction if everything succeeded
+	return tx.Commit()
+}
+
+// WithTx is the exported version of withTx for use outside the store package
+func WithTx(db *sql.DB, ctx context.Context, fn func(*sql.Tx) error) error {
+	return withTx(db, ctx, fn)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/moabdelazem/social/internal/db"
@@ -21,6 +22,16 @@ func main() {
 			maxOpenConnections: env.GetInt("DB_MAX_OPEN_CONNS", 30),
 			maxIdleConnections: env.GetInt("DB_MAX_IDLE_CONNS", 30),
 			maxIdleTime:        env.GetString("DB_MAX_IDLE_TIME", "15m"),
+		},
+		mail: mailConfig{
+			sendGrid: sendGridConfig{
+				apiKey: env.GetString("SENDGRID_API_KEY", ""),
+			},
+			mailTrap: mailTrapConfig{
+				apiKey: env.GetString("MAILTRAP_API_KEY", ""),
+			},
+			fromEmail: env.GetString("MAIL_FROM_EMAIL", "noreply@example.com"),
+			exp:       time.Duration(env.GetInt("MAIL_EXPIRY_HOURS", 168)) * time.Hour, // Default 7 days (168 hours)
 		},
 	}
 
