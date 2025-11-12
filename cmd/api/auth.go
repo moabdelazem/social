@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/moabdelazem/social/internal/mailer"
 	"github.com/moabdelazem/social/internal/store"
 )
 
@@ -61,9 +64,39 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	expiry := time.Now().Add(app.config.mail.exp)
 
 	if err := app.store.UsersRepo.CreateAndInvite(ctx, user, hashToken, expiry); err != nil {
-		app.internalServerError(w, r, err)
+		switch {
+		case errors.Is(err, store.ErrorConflict):
+			app.conflictResponse(w, r, err)
+		default:
+			app.internalServerError(w, r, err)
+		}
 		return
 	}
+
+	// Send activation email
+	activationURL := fmt.Sprintf("%s/activate?token=%s", app.config.frontendURL, plainToken)
+
+	emailData := mailer.EmailData{
+		Username:      user.Username,
+		ActivationURL: activationURL,
+		ExpiryTime:    expiry,
+		AppName:       "Social API",
+	}
+
+	// Send email in background
+	go func() {
+		if _, err := app.mailer.Send(user.Email, "Activate Your Account", "user_invitation", emailData, false); err != nil {
+			app.logger.Errorw("Failed to send activation email",
+				"error", err,
+				"email", user.Email,
+			)
+		} else {
+			app.logger.Infow("Activation email sent",
+				"email", user.Email,
+				"username", user.Username,
+			)
+		}
+	}()
 
 	userWithToken := UserWithToken{
 		User:  user,

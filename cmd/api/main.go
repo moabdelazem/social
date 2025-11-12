@@ -8,6 +8,7 @@ import (
 	"github.com/moabdelazem/social/internal/db"
 	"github.com/moabdelazem/social/internal/env"
 	"github.com/moabdelazem/social/internal/logger"
+	"github.com/moabdelazem/social/internal/mailer"
 	"github.com/moabdelazem/social/internal/store"
 )
 
@@ -15,8 +16,9 @@ func main() {
 	godotenv.Load()
 
 	cfg := config{
-		addr: env.GetString("ADDR", ":6767"),
-		env:  env.GetString("ENV", "development"),
+		addr:        env.GetString("ADDR", ":6767"),
+		env:         env.GetString("ENV", "development"),
+		frontendURL: env.GetString("FRONTEND_URL", "http://localhost:3000"),
 		db: dbConfig{
 			addr:               env.GetString("DB_ADDR", "postgres://admin:password@localhost:5432/?sslmode=disable"),
 			maxOpenConnections: env.GetInt("DB_MAX_OPEN_CONNS", 30),
@@ -24,12 +26,10 @@ func main() {
 			maxIdleTime:        env.GetString("DB_MAX_IDLE_TIME", "15m"),
 		},
 		mail: mailConfig{
-			sendGrid: sendGridConfig{
-				apiKey: env.GetString("SENDGRID_API_KEY", ""),
-			},
-			mailTrap: mailTrapConfig{
-				apiKey: env.GetString("MAILTRAP_API_KEY", ""),
-			},
+			smtpHost:  env.GetString("SMTP_HOST", "smtp.gmail.com"),
+			smtpPort:  env.GetInt("SMTP_PORT", 587),
+			smtpUser:  env.GetString("SMTP_USER", ""),
+			smtpPass:  env.GetString("SMTP_PASS", ""),
 			fromEmail: env.GetString("MAIL_FROM_EMAIL", "noreply@example.com"),
 			exp:       time.Duration(env.GetInt("MAIL_EXPIRY_HOURS", 168)) * time.Hour, // Default 7 days (168 hours)
 		},
@@ -60,11 +60,22 @@ func main() {
 	defer database.Close()
 	sugar.Info("Database connection pool established")
 
+	// Initialize mailer client
+	smtpConfig := mailer.SMTPConfig{
+		Host:     cfg.mail.smtpHost,
+		Port:     cfg.mail.smtpPort,
+		Username: cfg.mail.smtpUser,
+		Password: cfg.mail.smtpPass,
+		From:     cfg.mail.fromEmail,
+	}
+	mailClient := mailer.NewSMTPClient(smtpConfig)
+
 	store := store.NewStorage(database)
 	app := &application{
 		config: cfg,
 		store:  store,
 		logger: sugar,
+		mailer: mailClient,
 	}
 
 	sugar.Infow("Application starting",

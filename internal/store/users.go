@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -78,6 +79,10 @@ func (s *UsersStore) Create(ctx context.Context, user *User) error {
 	)
 
 	if err != nil {
+		// Check for unique constraint violation (duplicate username or email)
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrorConflict
+		}
 		return err
 	}
 
