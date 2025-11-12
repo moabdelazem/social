@@ -21,9 +21,12 @@ func (app *application) getUserFeedHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Get authenticated user from context
+	user := getUserFromCtx(r)
+
 	ctx := r.Context()
 
-	feed, err := app.store.PostsRepo.GetUserFeed(ctx, int64(2), fq)
+	feed, err := app.store.PostsRepo.GetUserFeed(ctx, user.ID, fq)
 	if err != nil {
 		app.internalServerError(w, r, err)
 		return
