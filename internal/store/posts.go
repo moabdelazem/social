@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/lib/pq"
@@ -30,7 +31,8 @@ type PostStore struct {
 	db *sql.DB
 }
 
-func (s *PostStore) GetUserFeed(ctx context.Context, userId int64) ([]PostsWithMetaData, error) {
+func (s *PostStore) GetUserFeed(ctx context.Context, userId int64, fq PaginatedFeedQuery) ([]PostsWithMetaData, error) {
+	// Build dynamic query with filters
 	query := `
 		SELECT 
 			p.id, p.user_id, p.title, p.content, p.created_at, p.updated_at, p.tags, p.version,
@@ -38,21 +40,58 @@ func (s *PostStore) GetUserFeed(ctx context.Context, userId int64) ([]PostsWithM
 		FROM posts p
 		LEFT JOIN comments c ON c.post_id = p.id
 		INNER JOIN followers f ON f.user_id = p.user_id
-		WHERE f.follower_id = $1
+		WHERE f.follower_id = $1`
+
+	// Dynamic query params
+	args := []interface{}{userId}
+	paramIndex := 2
+
+	// Add search filter (search in title and content)
+	if fq.Search != "" {
+		query += ` AND (p.title ILIKE $` + strconv.Itoa(paramIndex) + ` OR p.content ILIKE $` + strconv.Itoa(paramIndex) + `)`
+		args = append(args, "%"+fq.Search+"%")
+		paramIndex++
+	}
+
+	// Add tags filter (posts must contain all specified tags)
+	if len(fq.Tags) > 0 {
+		query += ` AND p.tags @> $` + strconv.Itoa(paramIndex)
+		args = append(args, pq.Array(fq.Tags))
+		paramIndex++
+	}
+
+	// Add since filter (posts created after this date)
+	if fq.Since != "" {
+		query += ` AND p.created_at >= $` + strconv.Itoa(paramIndex)
+		args = append(args, fq.Since)
+		paramIndex++
+	}
+
+	// Add until filter (posts created before this date)
+	if fq.Until != "" {
+		query += ` AND p.created_at <= $` + strconv.Itoa(paramIndex)
+		args = append(args, fq.Until)
+		paramIndex++
+	}
+
+	// Add GROUP BY, ORDER BY, LIMIT, and OFFSET
+	query += `
 		GROUP BY p.id
-		ORDER BY p.created_at DESC
-	`
+		ORDER BY p.created_at ` + fq.Sort + `
+		LIMIT $` + strconv.Itoa(paramIndex) + ` OFFSET $` + strconv.Itoa(paramIndex+1)
+
+	args = append(args, fq.Limit, fq.Offset)
 
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
 	defer cancel()
 
-	rows, err := s.db.QueryContext(ctx, query, userId)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var feed []PostsWithMetaData
+	feed := make([]PostsWithMetaData, 0)
 	for rows.Next() {
 		var p PostsWithMetaData
 		err := rows.Scan(
