@@ -44,6 +44,11 @@ func (app *application) followUserHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	app.logger.Infow("User followed",
+		"follower_id", payload.UserID,
+		"user_id", userToFollow.ID,
+	)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -71,6 +76,11 @@ func (app *application) unfollowUserHandler(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
+
+	app.logger.Infow("User unfollowed",
+		"follower_id", payload.UserID,
+		"user_id", userToUnfollow.ID,
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }

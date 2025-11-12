@@ -46,6 +46,12 @@ func (app *application) createPostHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	app.logger.Infow("Post created",
+		"post_id", post.ID,
+		"user_id", post.UserID,
+		"title", post.Title,
+	)
+
 	if err := app.jsonResponse(w, http.StatusCreated, post); err != nil {
 		app.internalServerError(w, r, err)
 		return
@@ -80,6 +86,11 @@ func (app *application) deletePostHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	app.logger.Infow("Post deleted",
+		"post_id", post.ID,
+		"user_id", post.UserID,
+	)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -111,6 +122,12 @@ func (app *application) updatePostHandler(w http.ResponseWriter, r *http.Request
 		app.internalServerError(w, r, err)
 		return
 	}
+
+	app.logger.Infow("Post updated",
+		"post_id", post.ID,
+		"user_id", post.UserID,
+		"version", post.Version,
+	)
 
 	if err := app.jsonResponse(w, http.StatusOK, post); err != nil {
 		app.internalServerError(w, r, err)
