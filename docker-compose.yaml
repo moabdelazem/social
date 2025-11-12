@@ -17,5 +17,22 @@ services:
             timeout: 5s
             retries: 5
 
+    dbeaver:
+        image: dbeaver/cloudbeaver:latest
+        container_name: myapp-dbeaver
+        restart: unless-stopped
+        ports:
+            - "8978:8978"
+        volumes:
+            - dbeaver_data:/opt/cloudbeaver/workspace
+        depends_on:
+            db:
+                condition: service_healthy
+        environment:
+            CB_SERVER_NAME: "Social API Database"
+            CB_ADMIN_NAME: admin
+            CB_ADMIN_PASSWORD: admin
+
 volumes:
     db_data:
+    dbeaver_data:
