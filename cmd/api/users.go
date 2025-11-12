@@ -7,10 +7,6 @@ import (
 	"github.com/moabdelazem/social/internal/store"
 )
 
-type FollowUser struct {
-	UserID int64 `json:"user_id" validate:"required"`
-}
-
 func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
 	user := getUserFromCtx(r)
 
@@ -22,19 +18,11 @@ func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
 func (app *application) followUserHandler(w http.ResponseWriter, r *http.Request) {
 	userToFollow := getUserFromCtx(r)
 
-	var payload FollowUser
-	if err := readJSON(w, r, &payload); err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
-
-	if err := Validate.Struct(payload); err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
+	// Get the authenticated user from JWT token (the follower)
+	authenticatedUser := r.Context().Value("user").(*store.User)
 
 	ctx := r.Context()
-	if err := app.store.FollowerRepo.Follow(ctx, payload.UserID, userToFollow.ID); err != nil {
+	if err := app.store.FollowerRepo.Follow(ctx, authenticatedUser.ID, userToFollow.ID); err != nil {
 		switch {
 		case errors.Is(err, store.ErrorConflict):
 			app.conflictResponse(w, r, err)
@@ -45,7 +33,7 @@ func (app *application) followUserHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	app.logger.Infow("User followed",
-		"follower_id", payload.UserID,
+		"follower_id", authenticatedUser.ID,
 		"user_id", userToFollow.ID,
 	)
 
@@ -55,19 +43,11 @@ func (app *application) followUserHandler(w http.ResponseWriter, r *http.Request
 func (app *application) unfollowUserHandler(w http.ResponseWriter, r *http.Request) {
 	userToUnfollow := getUserFromCtx(r)
 
-	var payload FollowUser
-	if err := readJSON(w, r, &payload); err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
-
-	if err := Validate.Struct(payload); err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
+	// Get the authenticated user from JWT token (the follower)
+	authenticatedUser := r.Context().Value("user").(*store.User)
 
 	ctx := r.Context()
-	if err := app.store.FollowerRepo.Unfollow(ctx, payload.UserID, userToUnfollow.ID); err != nil {
+	if err := app.store.FollowerRepo.Unfollow(ctx, authenticatedUser.ID, userToUnfollow.ID); err != nil {
 		switch {
 		case errors.Is(err, store.ErrorNotFollowing):
 			app.conflictResponse(w, r, err)
@@ -78,7 +58,7 @@ func (app *application) unfollowUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	app.logger.Infow("User unfollowed",
-		"follower_id", payload.UserID,
+		"follower_id", authenticatedUser.ID,
 		"user_id", userToUnfollow.ID,
 	)
 

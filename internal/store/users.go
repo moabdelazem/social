@@ -41,6 +41,8 @@ func (p *Password) ComparePassword(text string) error {
 	return bcrypt.CompareHashAndPassword(p.Hash, []byte(text))
 }
 
+// Scan implements the sql.Scanner interface for the Password type
+// This allows the database driver to scan password hash into the Password struct
 func (p *Password) Scan(value interface{}) error {
 	if value == nil {
 		p.Hash = nil
@@ -108,6 +110,34 @@ func (s *UsersStore) GetByID(ctx context.Context, id int64) (*User, error) {
 		&user.Email,
 		&user.Password,
 		&user.IsActive,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			return nil, ErrorNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return user, nil
+}
+
+func (s *UsersStore) GetByEmail(ctx context.Context, email string) (*User, error) {
+	query := `
+		SELECT id, username, email, password, created_at FROM users
+		WHERE email = $1 AND is_active = true
+	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
+	defer cancel()
+
+	user := &User{}
+	err := s.db.QueryRowContext(ctx, query, email).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.Password.Hash,
 		&user.CreatedAt,
 	)
 	if err != nil {
@@ -233,46 +263,4 @@ func (s *UsersStore) deleteUserInvitations(ctx context.Context, tx *sql.Tx, user
 	}
 
 	return nil
-}
-
-func (s *UsersStore) delete(ctx context.Context, tx *sql.Tx, id int64) error {
-	query := `DELETE FROM users WHERE id = $1`
-
-	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
-	defer cancel()
-
-	_, err := tx.ExecContext(ctx, query, id)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *UsersStore) GetByEmail(ctx context.Context, email string) (*User, error) {
-	query := `
-		SELECT id, username, email, password, created_at FROM users
-		WHERE email = $1 AND is_active = true
-	`
-	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
-	defer cancel()
-
-	user := &User{}
-	err := s.db.QueryRowContext(ctx, query, email).Scan(
-		&user.ID,
-		&user.Username,
-		&user.Email,
-		&user.Password.Hash,
-		&user.CreatedAt,
-	)
-	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, ErrorNotFound
-		default:
-			return nil, err
-		}
-	}
-
-	return user, nil
 }
