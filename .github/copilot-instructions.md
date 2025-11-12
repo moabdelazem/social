@@ -2,13 +2,15 @@
 
 ## Project Overview
 
-Go REST API for social media platform using **chi router**, **PostgreSQL**, and **repository pattern** with interface-based storage.
+Go REST API for social media platform using **chi router**, **PostgreSQL**, **JWT authentication**, and **repository pattern** with interface-based storage.
 
 ## Architecture: 3-Layer Pattern
 
 ```
-cmd/api/        → HTTP handlers, routing, JSON marshaling, middleware
+cmd/api/        → HTTP handlers, routing, JSON marshaling, middleware, auth
 internal/store/ → Repository interfaces + PostgreSQL implementations
+internal/auth/  → JWT token generation and validation
+internal/mailer/→ Email sending (Gmail SMTP) with HTML templates
 internal/db/    → Connection pool setup, seeding utilities
 ```
 
@@ -120,6 +122,17 @@ r.Route("/v1", func(r chi.Router) {
 
 **File**: `cmd/api/middlewares.go` - Centralized middleware functions
 
+**Authentication Middleware** (`AuthTokenMiddleware`):
+
+1. Extracts JWT from `Authorization: Bearer <token>` header
+2. Validates token using `app.authenticator.ValidateToken()`
+3. Extracts user ID from JWT claims (`sub` field)
+4. Fetches full user from database via `app.store.UsersRepo.GetByID()`
+5. Stores user in context: `context.WithValue(ctx, "user", user)`
+6. Retrieve with: `user := getUserFromCtx(r)` helper
+
+**CRITICAL**: Always apply `AuthTokenMiddleware` to protected routes. Missing it causes nil pointer panics when calling `getUserFromCtx(r)`.
+
 **Context middleware** (see `postsContextMiddleware`, `usersContextMiddleware`):
 
 1. Extract ID from URL params using `chi.URLParam(r, "postID")`
@@ -152,7 +165,7 @@ make migrate-force VERSION=6              # Fix dirty state (when migration fail
 
 **Storage**: `cmd/migrate/migrations/` with sequential naming (`000001_`, `000002_`, etc.)
 
-**Current migrations**: 8 total (users, posts, comments, followers, indexes)
+**Current migrations**: 10 total (users, posts, comments, followers, indexes, invitations, user activation)
 
 **Never**: Run raw DDL via `db.Exec()` - always create migration files
 
@@ -179,12 +192,35 @@ env.GetInt("DB_MAX_OPEN_CONNS", 30)      // Parse int or fallback
 
 **Loading**: `godotenv.Load()` in `main.go` reads `.env` (gitignored)
 
-**Example .env**:
+**Required .env variables**:
 
-```
+```env
+# Server
 ADDR=:6767
+ENV=development
+FRONTEND_URL=http://localhost:3000
+
+# Database
 DB_ADDR=postgres://devuser:devpass@localhost:5432/myapp_dev?sslmode=disable
+DB_MAX_OPEN_CONNS=30
+DB_MAX_IDLE_CONNS=30
+DB_MAX_IDLE_TIME=15m
+
+# JWT Authentication
+JWT_SECRET=your-secret-key-here
+JWT_EXPIRY_HOURS=168
+JWT_ISSUER=social-api
+
+# Email (Gmail SMTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+MAIL_FROM_EMAIL=noreply@example.com
+MAIL_EXPIRY_HOURS=168
 ```
+
+**Gmail Setup**: Use App Password (not regular password). See `docs/GMAIL_SETUP.md` for instructions.
 
 ## Development Commands
 
@@ -241,11 +277,82 @@ default:
 ## Common Pitfalls
 
 1. **Nil Pointer Panic in Store**: Check `NewStorage()` passes `db: db` to all struct fields
-2. **405 Instead of 404**: Configure `r.NotFound()` and `r.MethodNotAllowed()` in `mount()`
-3. **Hardcoded User IDs**: `POST /v1/posts` uses `UserID: 2` temporarily - run `make seed` first
+2. **Nil Pointer from Auth**: Missing `AuthTokenMiddleware` causes `getUserFromCtx(r)` to return nil
+3. **405 Instead of 404**: Configure `r.NotFound()` and `r.MethodNotAllowed()` in `mount()`
 4. **Array Scanning**: Always use `pq.Array()` for PostgreSQL array columns
 5. **Context Leaks**: Always `defer cancel()` after `context.WithTimeout()`
-6. **Duplicate Follows**: Use `ErrorConflict` detection for unique constraint violations
+6. **Duplicate Constraint Violations**: Check for `pq.Error` code `23505` and return `ErrorConflict`
+7. **Hardcoded Error Messages**: Use `err.Error()` in error responses, not generic messages
+
+## Authentication & Authorization
+
+**JWT Flow**:
+
+1. **Register**: `POST /v1/auth/register` → Creates user with `is_active=false`, sends activation email
+2. **Activate**: `PUT /v1/auth/activate` → Validates token hash, sets `is_active=true`
+3. **Login**: `POST /v1/auth/login` → Validates credentials, returns JWT + user data
+4. **Protected Routes**: Include `Authorization: Bearer <token>` header
+
+**Token Structure** (JWT claims):
+
+```go
+claims := jwt.MapClaims{
+    "sub": user.ID,              // Subject (user ID)
+    "exp": expiryTime.Unix(),    // Expiration
+    "iat": time.Now().Unix(),    // Issued at
+    "nbf": time.Now().Unix(),    // Not before
+    "iss": "social-api",         // Issuer
+    "aud": "social-api",         // Audience
+}
+```
+
+**Protected Route Pattern**:
+
+```go
+r.Route("/posts", func(r chi.Router) {
+    r.Use(app.AuthTokenMiddleware)  // ← Protects all routes in this group
+    r.Post("/", app.createPostHandler)
+
+    // Get authenticated user in handler:
+    user := getUserFromCtx(r)
+    post.UserID = user.ID
+})
+```
+
+## Email System
+
+**Stack**: Gmail SMTP with HTML templates via `internal/mailer/`
+
+**Mailer Interface**:
+
+```go
+type Client interface {
+    Send(to, subject, templateName string, data any, isSandbox bool) (int, error)
+}
+```
+
+**Sending Emails** (always in goroutine to avoid blocking):
+
+```go
+go func() {
+    emailData := mailer.EmailData{
+        Username:      user.Username,
+        ActivationURL: fmt.Sprintf("%s/activate?token=%s", frontendURL, token),
+        ExpiryTime:    expiry,
+        AppName:       "Social API",
+    }
+
+    if _, err := app.mailer.Send(user.Email, "Subject", "template_name", emailData, false); err != nil {
+        app.logger.Errorw("Failed to send email", "error", err)
+    }
+}()
+```
+
+**Templates**: Located in `internal/mailer/templates/` with `.html` extension. Use inline CSS for email client compatibility.
+
+**Current Templates**:
+
+- `user_invitation.html` - Account activation email
 
 ## Social Features Implementation
 
