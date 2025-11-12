@@ -179,6 +179,48 @@ func (s *PostStore) GetByID(ctx context.Context, id int64) (*Post, error) {
 	return &post, nil
 }
 
+func (s *PostStore) GetByUserID(ctx context.Context, userID int64) ([]Post, error) {
+	query := `
+		SELECT id, user_id, title, content, created_at, updated_at, tags, version
+	 	FROM posts
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeoutDuration)
+	defer cancel()
+
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []Post
+	for rows.Next() {
+		var post Post
+		err := rows.Scan(
+			&post.ID,
+			&post.UserID,
+			&post.Title,
+			&post.Content,
+			&post.CreatedAt,
+			&post.UpdatedAt,
+			pq.Array(&post.Tags),
+			&post.Version,
+		)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, post)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return posts, nil
+}
+
 func (s *PostStore) Delete(ctx context.Context, postID int64) error {
 	query := `
 		DELETE FROM posts WHERE id = $1

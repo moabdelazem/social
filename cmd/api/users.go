@@ -84,3 +84,18 @@ func (app *application) unfollowUserHandler(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (app *application) getUserPostsHandler(w http.ResponseWriter, r *http.Request) {
+	user := getUserFromCtx(r)
+
+	ctx := r.Context()
+	posts, err := app.store.PostsRepo.GetByUserID(ctx, user.ID)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	if err := app.jsonResponse(w, http.StatusOK, posts); err != nil {
+		app.internalServerError(w, r, err)
+	}
+}

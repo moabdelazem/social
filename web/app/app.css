@@ -1,15 +1,79 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: "JetBrains Mono", "Courier New", monospace;
+  --font-sans: "JetBrains Mono", "Courier New", monospace;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
-
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
-  }
+  @apply bg-white text-black;
+  font-family: var(--font-mono);
 }
+
+/* Clean RSS/Blog style */
+.container-box {
+  @apply border border-black p-6 bg-white;
+}
+
+.input-field {
+  @apply bg-white border-2 border-black text-black px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black font-mono;
+}
+
+.btn-primary {
+  @apply bg-black text-white px-6 py-2 font-bold hover:bg-gray-800 border-2 border-black font-mono transition-colors;
+}
+
+.btn-secondary {
+  @apply bg-white text-black px-6 py-2 font-bold hover:bg-gray-100 border-2 border-black font-mono transition-colors;
+}
+
+.text-main {
+  @apply text-black font-mono;
+}
+
+.text-muted {
+  @apply text-gray-600 font-mono;
+}
+
+.text-error {
+  @apply text-red-600 font-mono;
+}
+
+.heading-1 {
+  @apply text-3xl font-bold text-black mb-4 font-mono;
+}
+
+.heading-2 {
+  @apply text-2xl font-bold text-black mb-3 font-mono;
+}
+
+.heading-3 {
+  @apply text-xl font-bold text-black mb-2 font-mono;
+}
+
+/* Links */
+a {
+  @apply text-black underline hover:no-underline;
+}
+
+/* Lists */
+ul, ol {
+  @apply list-inside font-mono;
+}
+
+/* Dividers */
+hr {
+  @apply border-black my-4;
+}
+
+/* Pre/Code blocks */
+pre {
+  @apply font-mono text-black leading-relaxed bg-gray-50 p-4 border border-black;
+}
+
+code {
+  @apply font-mono bg-gray-50 px-1;
+}
+
+
