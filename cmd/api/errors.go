@@ -46,7 +46,7 @@ func (app *application) unauthorizedErrorResponse(w http.ResponseWriter, r *http
 		"path", r.URL.Path,
 		"method", r.Method,
 	)
-	writeJSONError(w, http.StatusUnauthorized, "you must be authenticated to access this resource")
+	writeJSONError(w, http.StatusUnauthorized, err.Error())
 }
 
 func (app *application) unauthorizedBasicErrorResponse(w http.ResponseWriter, r *http.Request, err error) {

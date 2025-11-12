@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/moabdelazem/social/internal/auth"
 	"github.com/moabdelazem/social/internal/db"
 	"github.com/moabdelazem/social/internal/env"
 	"github.com/moabdelazem/social/internal/logger"
@@ -32,6 +33,13 @@ func main() {
 			smtpPass:  env.GetString("SMTP_PASS", ""),
 			fromEmail: env.GetString("MAIL_FROM_EMAIL", "noreply@example.com"),
 			exp:       time.Duration(env.GetInt("MAIL_EXPIRY_HOURS", 168)) * time.Hour, // Default 7 days (168 hours)
+		},
+		auth: authConfig{
+			token: tokenConfig{
+				secret: env.GetString("JWT_SECRET", "not-so-secret-secret"),
+				exp:    time.Duration(env.GetInt("JWT_EXPIRY_HOURS", 24*7)) * time.Hour, // Default 7 days
+				iss:    env.GetString("JWT_ISSUER", "social-api"),
+			},
 		},
 	}
 
@@ -70,12 +78,20 @@ func main() {
 	}
 	mailClient := mailer.NewSMTPClient(smtpConfig)
 
+	// Initialize JWT authenticator
+	jwtAuthenticator := auth.NewJWTAuthenticator(
+		cfg.auth.token.secret,
+		cfg.auth.token.iss,
+		cfg.auth.token.iss,
+	)
+
 	store := store.NewStorage(database)
 	app := &application{
-		config: cfg,
-		store:  store,
-		logger: sugar,
-		mailer: mailClient,
+		config:        cfg,
+		store:         store,
+		logger:        sugar,
+		mailer:        mailClient,
+		authenticator: jwtAuthenticator,
 	}
 
 	sugar.Infow("Application starting",

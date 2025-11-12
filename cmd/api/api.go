@@ -6,16 +6,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/moabdelazem/social/internal/auth"
 	"github.com/moabdelazem/social/internal/mailer"
 	"github.com/moabdelazem/social/internal/store"
 	"go.uber.org/zap"
 )
 
 type application struct {
-	config config
-	store  store.Storage
-	logger *zap.SugaredLogger
-	mailer mailer.Client
+	config        config
+	store         store.Storage
+	logger        *zap.SugaredLogger
+	mailer        mailer.Client
+	authenticator auth.Authenticator
 }
 
 type config struct {
@@ -24,6 +26,17 @@ type config struct {
 	frontendURL string
 	db          dbConfig
 	mail        mailConfig
+	auth        authConfig
+}
+
+type authConfig struct {
+	token tokenConfig
+}
+
+type tokenConfig struct {
+	secret string
+	exp    time.Duration
+	iss    string
 }
 
 type mailConfig struct {
@@ -68,6 +81,7 @@ func (app *application) mount() http.Handler {
 
 		// Posts Route Group
 		r.Route("/posts", func(r chi.Router) {
+			r.Use(app.AuthTokenMiddleware)
 			r.Post("/", app.createPostHandler)
 
 			r.Route("/{postID}", func(r chi.Router) {
@@ -82,6 +96,7 @@ func (app *application) mount() http.Handler {
 		// Users Route Group
 		r.Route("/users", func(r chi.Router) {
 			r.Route("/{userID}", func(r chi.Router) {
+				r.Use(app.AuthTokenMiddleware)
 				r.Use(app.usersContextMiddleware)
 
 				r.Get("/", app.getUserHandler)
@@ -97,6 +112,7 @@ func (app *application) mount() http.Handler {
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", app.registerUserHandler)
 			r.Put("/activate", app.activateUserHandler)
+			r.Post("/login", app.loginUserHandler)
 		})
 	})
 

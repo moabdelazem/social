@@ -32,6 +32,7 @@ type Posts interface {
 type Users interface {
 	Create(context.Context, *User) error
 	GetByID(context.Context, int64) (*User, error)
+	GetByEmail(context.Context, string) (*User, error)
 	CreateAndInvite(context.Context, *User, string, time.Time) error
 	Activate(context.Context, string) error
 }

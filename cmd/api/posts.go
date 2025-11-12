@@ -34,8 +34,11 @@ func (app *application) createPostHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Get authenticated user from context
+	user := getUserFromCtx(r)
+
 	post := &store.Post{
-		UserID:  2, // This is Termporary
+		UserID:  user.ID,
 		Title:   payload.Title,
 		Content: payload.Content,
 		Tags:    payload.Tags,

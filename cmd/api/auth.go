@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/moabdelazem/social/internal/mailer"
 	"github.com/moabdelazem/social/internal/store"
@@ -26,6 +27,11 @@ type ActivateUserPayload struct {
 type UserWithToken struct {
 	*store.User
 	Token string `json:"token"`
+}
+
+type CreateTokenPayload struct {
+	Email    string `json:"email" validate:"required,email,max=200"`
+	Password string `json:"password" validate:"required,min=3,max=73"`
 }
 
 func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +116,72 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	)
 
 	if err := app.jsonResponse(w, http.StatusCreated, userWithToken); err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+}
+
+func (app *application) loginUserHandler(w http.ResponseWriter, r *http.Request) {
+	var payload CreateTokenPayload
+	if err := readJSON(w, r, &payload); err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// Validate the request payload
+	if err := Validate.Struct(payload); err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get user by email
+	user, err := app.store.UsersRepo.GetByEmail(ctx, payload.Email)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrorNotFound):
+			app.unauthorizedErrorResponse(w, r, errors.New("invalid credentials"))
+		default:
+			app.internalServerError(w, r, err)
+		}
+		return
+	}
+
+	// Compare password
+	if err := user.Password.ComparePassword(payload.Password); err != nil {
+		app.unauthorizedErrorResponse(w, r, errors.New("invalid credentials"))
+		return
+	}
+
+	claims := jwt.MapClaims{
+		"sub": user.ID,
+		"exp": time.Now().Add(app.config.auth.token.exp).Unix(),
+		"iat": time.Now().Unix(),
+		"nbf": time.Now().Unix(),
+		"iss": app.config.auth.token.iss,
+		"aud": app.config.auth.token.iss,
+	}
+
+	token, err := app.authenticator.GenerateToken(claims)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	app.logger.Infow("User logged in",
+		"user_id", user.ID,
+		"username", user.Username,
+		"email", user.Email,
+	)
+
+	// Return user data with token
+	response := map[string]interface{}{
+		"token": token,
+		"user":  user,
+	}
+
+	if err := app.jsonResponse(w, http.StatusOK, response); err != nil {
 		app.internalServerError(w, r, err)
 		return
 	}
