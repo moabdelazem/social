@@ -41,6 +41,12 @@ func main() {
 				iss:    env.GetString("JWT_ISSUER", "social-api"),
 			},
 		},
+		cors: corsConfig{
+			allowedOrigins: []string{
+				env.GetString("FRONTEND_URL", "http://localhost:3000"),
+				"http://localhost:5173",
+			},
+		},
 	}
 
 	// Initialize logger

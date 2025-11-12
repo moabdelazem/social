@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/moabdelazem/social/internal/auth"
 	"github.com/moabdelazem/social/internal/mailer"
 	"github.com/moabdelazem/social/internal/store"
@@ -27,6 +28,11 @@ type config struct {
 	db          dbConfig
 	mail        mailConfig
 	auth        authConfig
+	cors        corsConfig
+}
+
+type corsConfig struct {
+	allowedOrigins []string
 }
 
 type authConfig struct {
@@ -64,6 +70,16 @@ func (app *application) mount() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Use(middleware.Timeout(time.Second * 67)) // SIX SEVEN
+
+	// CORS configuration
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   app.config.cors.allowedOrigins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	}))
 
 	// Custom 404 Not Found handler
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
